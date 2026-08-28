@@ -524,7 +524,12 @@ vitest file beside them; route folders hold only `page.tsx`/`data.ts`/
 - **Every run timestamp renders through `components/local-time.tsx`** in the
   viewer's zone (`vrt-tz` cookie, `lib/viewer-time-zone.ts` +
   `TimeZoneProvider` — no flash); only the `/projects` timeline buckets by
-  the *server's* day (`lib/run-history.ts`). → *Project run table*
+  the *server's* day (`lib/run-history.ts`) — and **names the buckets there
+  too** (`key`/`weekdayInitial`/`label`/`tooltipLabel` on `RunHistoryDay`):
+  `runs-timeline.tsx` must never format `day.date` itself. In a browser
+  whose calendar day differs from the server's the letters disagree,
+  hydration fails, React 19 re-renders the root and the theme class on
+  `<html>` is gone. → *Project run table*
 - **Run page**: grid grouped by page (`groupRunGrid`), cards titled by
   viewport, capture failures as cards in the same grid, per-page "Approve N"
   + footer "Approve all" (hidden at 0 pending or while running). Cards carry

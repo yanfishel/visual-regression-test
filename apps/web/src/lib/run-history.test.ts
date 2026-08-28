@@ -29,13 +29,31 @@ describe("bucketRunHistory", () => {
     expect(history.totalFailed).toBe(0);
   });
 
+  it("names each bucket on the server, so the client never formats the date itself", () => {
+    // The client component renders these strings as-is: formatting the
+    // instant in the browser would use the viewer's zone and, near midnight,
+    // land on a different calendar day than the server bucketed by - a
+    // hydration mismatch that React 19 recovers from by re-rendering the
+    // root, which drops the theme class from <html>.
+    const history = bucketRunHistory([], new Set(), { days: 3, now: NOW });
+
+    expect(history.days.map((day) => day.key)).toEqual(["2026-08-13", "2026-08-14", "2026-08-15"]);
+    expect(history.days.map((day) => day.weekdayInitial)).toEqual(["T", "F", "S"]);
+    expect(history.days.map((day) => day.label)).toEqual(["Aug 13", "Aug 14", "Aug 15"]);
+    expect(history.days.map((day) => day.tooltipLabel)).toEqual([
+      "Thu, Aug 13",
+      "Fri, Aug 14",
+      "Sat, Aug 15",
+    ]);
+  });
+
   it("counts a finished run with no failed comparison as passed in its day", () => {
     const history = bucketRunHistory([run("a", "done", localDate(2026, 8, 14))], new Set(), {
       days: 3,
       now: NOW,
     });
 
-    expect(history.days[1]).toEqual({
+    expect(history.days[1]).toMatchObject({
       date: new Date(2026, 7, 14),
       passed: 1,
       failed: 0,
@@ -50,7 +68,7 @@ describe("bucketRunHistory", () => {
       now: NOW,
     });
 
-    expect(history.days[2]).toEqual({
+    expect(history.days[2]).toMatchObject({
       date: new Date(2026, 7, 15),
       passed: 0,
       failed: 1,
