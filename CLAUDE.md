@@ -15,6 +15,7 @@ it is loaded into every session. The detail lives next to it:
 | `docs/notes/ui.md`                      | Every UI decision and trap history, screen by screen, plus the **screen map** (which files make up which screen). **Read before touching UI code.** |
 | `docs/notes/auth.md`                    | Auth modes, Clerk, roles/quotas, e2e. **Read before touching auth code.**               |
 | `docs/notes/worker.md`                  | Capture, favicon, comparison thresholds, storage internals, queue helpers, scheduler internals. **Read before touching the worker or storage.** |
+| `docs/notes/deploy.md`                  | Server setup, GitHub secrets, release/rollback procedure and trap history for the release deploy. **Read before touching `scripts/deploy.sh`, `docker-compose.prod.yml` or `deploy.yml`.** |
 | Code comments                           | Non-obvious *local* reasoning; many cite a CLAUDE.md section number — **keep §-numbers stable** when editing this file. |
 
 Durable knowledge belongs here or in `docs/notes/`, never in per-machine
@@ -30,6 +31,7 @@ story to the notes and leave the rule + a one-line trap here.
 | `npm run db:generate` / `db:migrate` / `db:seed` | Drizzle migration generate/apply, demo projects. **A schema change needs a dev-server restart** (§9 trap index). |
 | `npm run e2e`                             | Playwright auth suite against the real Clerk dev instance, local-only (§12). |
 | `docker compose up -d`                    | Whole stack (§2).                                                        |
+| `scripts/deploy.sh <tag>`                 | **Server-side only**: what a published GitHub Release runs (§15).       |
 
 ---
 
@@ -770,3 +772,48 @@ Everything except secrets is in the repo. On a fresh machine:
 5. Don't copy `.data/shots` or the Postgres volume: a fresh machine simply
    starts with an empty DB, and the first run per page/viewport auto-creates
    its baseline.
+
+---
+
+## 15. Deployment
+
+Full write-up (server setup commands, secrets, trap history):
+**`docs/notes/deploy.md`**. The rules:
+
+- **A published GitHub Release deploys itself.** `.github/workflows/deploy.yml`
+  (`release: published`, drafts and prereleases excluded) SSHes into the
+  server as the `deploy` user, checks the tag out in the server's clone
+  (`DEPLOY_PATH`, `/opt/vrt`) and runs `scripts/deploy.sh <tag>` from *that*
+  checkout: fetch → checkout → `docker compose build --pull` → `up -d
+  --remove-orphans` → prune dangling layers → poll `127.0.0.1:3000` for up
+  to 60 s. **Rollback = the same workflow by hand** (`workflow_dispatch`
+  with an older tag) or `scripts/deploy.sh <old-tag>` on the server.
+- **Images build on the server, there is no registry.** The build is the
+  slow part (Playwright base image + `next build`); a VPS under 4 GB needs
+  swap or `next build` dies of OOM. Deploys serialise
+  (`concurrency: deploy`, no cancel) — a cancelled build would leave the
+  old containers already stopped.
+- **`docker-compose.prod.yml` is layered over the base file** and only
+  changes ports: `web` on `127.0.0.1:3000` behind the host's own reverse
+  proxy, `postgres`/`redis` unpublished (`!override`, not a merge — the
+  base file's `"3000:3000"` would otherwise stay). Everything else
+  (migrate one-shot, bind-mounted `.data/shots`, env from `.env`) is the
+  §2 stack as-is; the migrations run on every deploy through the
+  `migrate` dependency.
+- **Secrets live in two places, never three:** the server's `.env`
+  (hand-edited, `chmod 600`, never in GitHub) and five GitHub Actions
+  secrets that only describe the SSH hop (`DEPLOY_HOST`, `DEPLOY_USER`,
+  `DEPLOY_PATH`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`). The deploy key is
+  a dedicated ed25519 pair; `known_hosts` is pinned, not `ssh-keyscan`ned
+  at run time.
+- **Known trap:** `.data/shots` must exist and be writable by uid 1000
+  before the first `up` — a bind-mount directory Docker creates itself is
+  root-owned and the worker (`pwuser`) can't write shots. `deploy.sh`
+  `mkdir -p`s it; the one-time `chown 1000:1000` is in deploy.md.
+- **Known trap:** `deploy.sh` replaces *itself* mid-run (`git checkout`),
+  so the whole body sits in `main()` called on the last line — bash reads
+  scripts incrementally and would otherwise continue in the new file at
+  the old offset.
+- The reverse proxy must not buffer `/api/events` (SSE, §9 "Live updates")
+  — nginx: `proxy_buffering off` + a long `proxy_read_timeout` for that
+  location.

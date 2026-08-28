@@ -1,0 +1,134 @@
+# Deployment — full notes
+
+Detailed write-up behind CLAUDE.md §15. The rules live there; this file
+keeps the server setup, the GitHub side and the reasoning. Started
+2026-08-28.
+
+## Shape
+
+One Debian VPS, Docker Engine + compose plugin, the repo cloned to
+`/opt/vrt` under a dedicated `deploy` user, the app served by the host's
+own reverse proxy from `127.0.0.1:3000`. A published GitHub Release runs
+`.github/workflows/deploy.yml`, which SSHes in and runs
+`scripts/deploy.sh <tag>`. Images are built on the server; there is no
+registry and no CI artefact. That was a deliberate choice over
+build-in-Actions-push-to-GHCR: fewer moving parts for a single-server
+install, at the cost of build time on the VPS.
+
+## Server setup (Debian 12, once)
+
+All as a sudo-capable user. Docker comes from Docker's own apt repository —
+Debian's package is old and ships without the compose plugin.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Swap if the box has less than 4 GB (`free -h`) — `next build` inside the
+web image and the Playwright base image are the memory hogs:
+
+```bash
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+The `deploy` user (docker group, no sudo) and the checkout:
+
+```bash
+sudo adduser --disabled-password --gecos "" deploy
+sudo usermod -aG docker deploy
+sudo mkdir -p /opt/vrt && sudo chown deploy:deploy /opt/vrt
+sudo -iu deploy git clone https://github.com/yanfishel/visual-regression-test.git /opt/vrt
+sudo -iu deploy mkdir -p /opt/vrt/.data/shots
+sudo chown 1000:1000 /opt/vrt/.data/shots
+```
+
+The last two lines are the `.data/shots` trap (§15): both images run as
+uid 1000 (`node` in `node:22-slim`, `pwuser` in the Playwright image); a
+bind-mount directory that Docker creates on first `up` is root-owned and
+the worker fails every `put`. `deploy.sh` keeps `mkdir -p`ing it so a
+wiped directory reappears, but ownership is set here, once.
+
+`.env`, from the example, `chmod 600`:
+
+```bash
+sudo -iu deploy bash -c 'cp /opt/vrt/.env.example /opt/vrt/.env && chmod 600 /opt/vrt/.env && nano /opt/vrt/.env'
+```
+
+Set `POSTGRES_PASSWORD` (Compose builds `DATABASE_URL` from the
+`POSTGRES_*` values itself, so the example's `DATABASE_URL` line is
+irrelevant here), `APP_URL=https://<domain>`, `AUTH_MODE` plus the three
+`CLERK_*` keys in clerk mode, and both mail variables or neither (§4
+"Notifications").
+
+The deploy SSH key is generated on the developer machine, not on the
+server, so the private half never sits on the box:
+
+```powershell
+ssh-keygen -t ed25519 -C vrt-deploy -f $env:USERPROFILE\.ssh\vrt-deploy -N '""'
+```
+
+Public half into `~deploy/.ssh/authorized_keys` (`chmod 700 ~/.ssh`,
+`600 authorized_keys`). Verify with
+`ssh -i ~/.ssh/vrt-deploy deploy@<host> docker ps`. The host key for the
+workflow's pinned `known_hosts` comes from `ssh-keyscan -t ed25519 <host>`
+run locally.
+
+## GitHub side
+
+Repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret               | Value                                          |
+|----------------------|------------------------------------------------|
+| `DEPLOY_HOST`        | domain or IP                                   |
+| `DEPLOY_USER`        | `deploy`                                       |
+| `DEPLOY_PATH`        | `/opt/vrt`                                     |
+| `DEPLOY_SSH_KEY`     | the private key file, verbatim                 |
+| `DEPLOY_KNOWN_HOSTS` | the `ssh-keyscan` line                         |
+
+Nothing from `.env` goes to GitHub. The workflow passes the secrets to
+its steps through `env:`, never interpolated into the shell script, and
+validates the manual `tag` input against git ref characters before it
+reaches the SSH command line.
+
+## Releasing and rolling back
+
+1. Merge to `master` (CI already ran there).
+2. GitHub → Releases → Draft a new release → new tag `vX.Y.Z` on `master`
+   → Publish. Publishing fires `deploy.yml`; a *draft* or *prerelease*
+   does not deploy.
+3. Watch the Actions run: the log shows the checkout, both builds, `up`,
+   and the final `docker compose ps`. On failure the script prints
+   `ps` plus the last 50 lines of `migrate` and `web`.
+
+Rollback: Actions → Deploy → Run workflow → tag of the previous release.
+The same on the server without GitHub:
+`sudo -iu deploy /opt/vrt/scripts/deploy.sh v1.2.3`. Migrations are
+forward-only (drizzle), so a rollback past a schema change needs a
+matching DB restore — there is no automation for that.
+
+## Reverse proxy
+
+The proxy is not part of the repo. Whatever it is, `/api/events` is an
+SSE stream (§9 "Live updates"): nginx needs `proxy_buffering off;` and a
+long `proxy_read_timeout` (e.g. `1h`) on that location, `proxy_http_version
+1.1` and `Connection ""`; otherwise live updates stall behind the buffer
+or get cut by the default 60 s read timeout.
+
+## Why the script checks the tag out twice
+
+The workflow's SSH command does `git fetch && git checkout <tag>` and only
+then calls `scripts/deploy.sh <tag>`, which fetches and checks out again.
+The first checkout makes the server run the deploy logic *of the release
+being deployed*; the second exists so a hand-run rollback needs only the
+tag. Because the script may replace itself during its own checkout, its
+body lives in `main()` invoked on the last line (§15 trap).
