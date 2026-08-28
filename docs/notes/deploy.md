@@ -8,7 +8,7 @@ keeps the server setup, the GitHub side and the reasoning. Started
 
 One Debian VPS, Docker Engine + compose plugin, the repo cloned to
 `/opt/vrt` under a dedicated `deploy` user, the app served by the host's
-own reverse proxy from `127.0.0.1:3000`. A published GitHub Release runs
+own reverse proxy from `127.0.0.1:${WEB_PORT:-3000}`. A published GitHub Release runs
 `.github/workflows/deploy.yml`, which SSHes in and runs
 `scripts/deploy.sh <tag>`. Images are built on the server; there is no
 registry and no CI artefact. That was a deliberate choice over
@@ -68,7 +68,11 @@ Set `POSTGRES_PASSWORD` (Compose builds `DATABASE_URL` from the
 `POSTGRES_*` values itself, so the example's `DATABASE_URL` line is
 irrelevant here), `APP_URL=https://<domain>`, `AUTH_MODE` plus the three
 `CLERK_*` keys in clerk mode, and both mail variables or neither (§4
-"Notifications").
+"Notifications"). `WEB_PORT` is the host-side port the proxy talks to
+(`127.0.0.1:<WEB_PORT>`, default 3000) — set it when something else on the
+box already owns 3000 (`ss -ltnp | grep :3000`); `up` otherwise fails with
+"failed to bind host port 127.0.0.1:3000/tcp: address already in use".
+The container port stays 3000, only the host side moves.
 
 The deploy SSH key is generated on the developer machine, not on the
 server, so the private half never sits on the box:
@@ -118,8 +122,8 @@ matching DB restore — there is no automation for that.
 
 ## Reverse proxy
 
-The proxy is not part of the repo. Whatever it is, `/api/events` is an
-SSE stream (§9 "Live updates"): nginx needs `proxy_buffering off;` and a
+The proxy is not part of the repo; it upstreams to `127.0.0.1:<WEB_PORT>`.
+Whatever it is, `/api/events` is an SSE stream (§9 "Live updates"): nginx needs `proxy_buffering off;` and a
 long `proxy_read_timeout` (e.g. `1h`) on that location, `proxy_http_version
 1.1` and `Connection ""`; otherwise live updates stall behind the buffer
 or get cut by the default 60 s read timeout.
