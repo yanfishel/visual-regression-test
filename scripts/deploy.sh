@@ -46,10 +46,14 @@ main() {
   echo "==> removing dangling image layers from earlier builds"
   docker image prune -f >/dev/null
 
-  echo "==> waiting for the web app"
+  # The host-side port comes from WEB_PORT in the server's .env
+  # (docker-compose.prod.yml); ask compose rather than duplicating the default.
+  local addr
+  addr="$("${compose[@]}" port web 3000)"
+  echo "==> waiting for the web app on $addr"
   local attempt
   for attempt in $(seq 1 30); do
-    if curl -fsS -o /dev/null http://127.0.0.1:3000/; then
+    if curl -fsS -o /dev/null "http://$addr/"; then
       echo "==> deployed $tag"
       "${compose[@]}" ps
       return 0
@@ -57,7 +61,7 @@ main() {
     sleep 2
   done
 
-  echo "deploy: web did not answer on 127.0.0.1:3000 within 60s" >&2
+  echo "deploy: web did not answer on $addr within 60s" >&2
   "${compose[@]}" ps >&2
   "${compose[@]}" logs --tail 50 migrate web >&2
   exit 1

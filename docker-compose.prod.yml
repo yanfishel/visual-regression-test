@@ -10,8 +10,10 @@ services:
   web:
     # `!override` replaces the list instead of merging with the base file's
     # "3000:3000", which would publish the app on every interface as well.
+    # WEB_PORT (server .env) is the host-side port the reverse proxy talks
+    # to; another service on the box may already own 3000.
     ports: !override
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
   postgres:
     # Never on a public interface: the other services reach it over the

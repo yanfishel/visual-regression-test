@@ -785,8 +785,8 @@ Full write-up (server setup commands, secrets, trap history):
   server as the `deploy` user, checks the tag out in the server's clone
   (`DEPLOY_PATH`, `/opt/vrt`) and runs `scripts/deploy.sh <tag>` from *that*
   checkout: fetch → checkout → `docker compose build --pull` → `up -d
-  --remove-orphans` → prune dangling layers → poll `127.0.0.1:3000` for up
-  to 60 s. **Rollback = the same workflow by hand** (`workflow_dispatch`
+  --remove-orphans` → prune dangling layers → poll the published web port
+  for up to 60 s. **Rollback = the same workflow by hand** (`workflow_dispatch`
   with an older tag) or `scripts/deploy.sh <old-tag>` on the server.
 - **Images build on the server, there is no registry.** The build is the
   slow part (Playwright base image + `next build`); a VPS under 4 GB needs
@@ -794,9 +794,11 @@ Full write-up (server setup commands, secrets, trap history):
   (`concurrency: deploy`, no cancel) — a cancelled build would leave the
   old containers already stopped.
 - **`docker-compose.prod.yml` is layered over the base file** and only
-  changes ports: `web` on `127.0.0.1:3000` behind the host's own reverse
-  proxy, `postgres`/`redis` unpublished (`!override`, not a merge — the
-  base file's `"3000:3000"` would otherwise stay). Everything else
+  changes ports: `web` on `127.0.0.1:${WEB_PORT:-3000}` (server `.env`)
+  behind the host's own reverse proxy, `postgres`/`redis` unpublished
+  (`!override`, not a merge — the base file's `"3000:3000"` would otherwise
+  stay). `deploy.sh` asks `compose port web 3000` which host port to poll
+  instead of assuming it. Everything else
   (migrate one-shot, bind-mounted `.data/shots`, env from `.env`) is the
   §2 stack as-is; the migrations run on every deploy through the
   `migrate` dependency.
