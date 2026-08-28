@@ -8,13 +8,10 @@ import { formatCompact } from "@/lib/chart-ticks";
 import type { RunHistory, RunHistoryDay } from "@/lib/run-history";
 import { CaretDownIcon, CaretUpIcon } from "./icons";
 
-const DAY_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-const WEEKDAY_INITIAL_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "narrow" });
-const TOOLTIP_DAY_FORMAT = new Intl.DateTimeFormat("en-US", {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-});
+// No date formatting here: every label comes pre-rendered on `RunHistoryDay`
+// (lib/run-history.ts), in the zone the buckets were built in. Formatting
+// `day.date` in the browser would use the viewer's zone and could name a
+// different day than the server did - a hydration mismatch.
 
 // Runs per calendar day in the /projects sidebar, under a pass-rate headline:
 // the columns answer "how busy", the headline and its week-over-week delta
@@ -68,12 +65,7 @@ export function RunsTimeline({ history }: { history: RunHistory }) {
         <div aria-hidden className="mt-6">
           <ol className="flex h-[92px] items-end">
             {days.map((day, index) => (
-              <DayColumn
-                key={day.date.getTime()}
-                day={day}
-                scaleMax={scaleMax}
-                labelled={index === peakIndex}
-              />
+              <DayColumn key={day.key} day={day} scaleMax={scaleMax} labelled={index === peakIndex} />
             ))}
           </ol>
 
@@ -82,7 +74,7 @@ export function RunsTimeline({ history }: { history: RunHistory }) {
           <div className="relative flex h-[3px]">
             <span className="absolute inset-x-0 top-0 h-px bg-border" />
             {days.map((day) => (
-              <span key={day.date.getTime()} className="relative flex-1">
+              <span key={day.key} className="relative flex-1">
                 {/* Capped, not fixed: the tick has to track the bar above it,
                     and the bar gives its slot back once the panel narrows. */}
                 {day.failed > 0 && (
@@ -95,20 +87,20 @@ export function RunsTimeline({ history }: { history: RunHistory }) {
           <div className="mt-1.5 flex font-mono text-[10px] leading-none text-text-faint">
             {days.map((day, index) => (
               <span
-                key={day.date.getTime()}
+                key={day.key}
                 className={`flex-1 text-center ${
                   // The last bucket is today by construction, and today is
                   // still counting - the accent says so without a legend row.
                   index === days.length - 1 ? "font-bold text-accent" : ""
                 }`}
               >
-                {WEEKDAY_INITIAL_FORMAT.format(day.date)}
+                {day.weekdayInitial}
               </span>
             ))}
           </div>
           <div className="mt-1 flex justify-between font-mono text-[10px] text-text-faint">
-            <span>{DAY_FORMAT.format(days[0]!.date)}</span>
-            <span>{DAY_FORMAT.format(days[days.length - 1]!.date)}</span>
+            <span>{days[0]!.label}</span>
+            <span>{days[days.length - 1]!.label}</span>
           </div>
         </div>
 
@@ -135,8 +127,8 @@ export function RunsTimeline({ history }: { history: RunHistory }) {
           {days.map(
             (day) =>
               day.passed + day.failed + day.pending > 0 && (
-                <tr key={day.date.getTime()}>
-                  <th scope="row">{DAY_FORMAT.format(day.date)}</th>
+                <tr key={day.key}>
+                  <th scope="row">{day.label}</th>
                   <td>{day.passed}</td>
                   <td>{day.failed}</td>
                   <td>{day.pending}</td>
@@ -231,7 +223,7 @@ function DayColumn({ day, scaleMax, labelled }: { day: RunHistoryDay; scaleMax: 
           sideOffset={6}
           className="z-50 select-none rounded-md bg-text px-2 py-1 text-xs font-medium text-bg shadow-md"
         >
-          {`${TOOLTIP_DAY_FORMAT.format(day.date)} — ${figures}`}
+          {`${day.tooltipLabel} — ${figures}`}
           <Tooltip.Arrow className="fill-text" />
         </Tooltip.Content>
       </Tooltip.Portal>

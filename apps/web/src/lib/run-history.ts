@@ -5,6 +5,22 @@ import { runOutcome } from "./run-outcome.js";
 export interface RunHistoryDay {
   /** Local midnight of the bucket's calendar day. */
   date: Date;
+  /**
+   * The day's labels, rendered here in the server's zone - the one the
+   * buckets follow - never by the client component from `date`. Formatting
+   * the instant in the browser would use the viewer's zone and, near
+   * midnight, name a different calendar day than the server did: a
+   * hydration mismatch that React 19 recovers from by re-rendering the root,
+   * which also drops the theme class the init script put on <html>.
+   */
+  /** `YYYY-MM-DD`, a stable React key. */
+  key: string;
+  /** One letter under the column: "M". */
+  weekdayInitial: string;
+  /** Axis ends and the sr-only table: "Aug 22". */
+  label: string;
+  /** Column tooltip: "Fri, Aug 22". */
+  tooltipLabel: string;
   passed: number;
   failed: number;
   /** Queued or running: counted so a half-finished day reads as such, never an outcome. */
@@ -33,6 +49,21 @@ export interface RunHistory {
 
 export const RUN_HISTORY_DAYS = 7;
 
+const WEEKDAY_INITIAL_FORMAT = new Intl.DateTimeFormat("en-US", { weekday: "narrow" });
+const DAY_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const TOOLTIP_DAY_FORMAT = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+});
+
+// Local calendar fields, not toISOString: the bucket is a local midnight and
+// the ISO form would shift it to the previous UTC day east of Greenwich.
+function localDateKey(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Buckets follow the server's local calendar days - a run at 23:00 belongs to
@@ -54,7 +85,16 @@ export function bucketRunHistory(
   const days: RunHistoryDay[] = Array.from({ length: options.days }, (_, index) => {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
-    return { date, passed: 0, failed: 0, pending: 0 };
+    return {
+      date,
+      key: localDateKey(date),
+      weekdayInitial: WEEKDAY_INITIAL_FORMAT.format(date),
+      label: DAY_FORMAT.format(date),
+      tooltipLabel: TOOLTIP_DAY_FORMAT.format(date),
+      passed: 0,
+      failed: 0,
+      pending: 0,
+    };
   });
 
   let previousPassed = 0;
