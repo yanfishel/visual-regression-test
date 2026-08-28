@@ -1,0 +1,69 @@
+name: Deploy
+
+# One published (non-draft, non-prerelease) GitHub Release = one deploy of
+# that tag to the server. The manual trigger deploys any tag, which is also
+# the rollback: run it for the previous release. Server setup, the secrets
+# and the trap history: docs/notes/deploy.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to deploy (an older one rolls back)"
+        required: true
+        type: string
+
+# Deploys queue behind each other; a cancelled run could leave the server
+# mid-build with the old containers already stopped.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Prereleases are for testing elsewhere; `release` is null on a manual
+    # run, so the condition is true there.
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    # The images build on the server itself (no registry); a small VPS can
+    # take a while on the Playwright-based worker image.
+    timeout-minutes: 45
+    steps:
+      - name: Resolve the tag
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        # The tag lands in a shell command on the server - keep the manual
+        # input to git ref characters.
+        run: |
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            echo "not a usable tag: '$TAG'" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+
+      - name: Deploy ${{ steps.tag.outputs.tag }}
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        # Check the tag out *before* calling the script, so the server runs
+        # the deploy logic of the release being deployed rather than the
+        # script of whatever was checked out before. The script repeats the
+        # checkout (a no-op here) so a hand-run rollback needs only the tag.
+        run: |
+          ssh -i ~/.ssh/deploy_key -o ServerAliveInterval=30 -o BatchMode=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd '$DEPLOY_PATH' && git fetch --tags --force origin && git checkout --detach --quiet '$TAG' && scripts/deploy.sh '$TAG'"

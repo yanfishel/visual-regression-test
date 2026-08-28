@@ -1,0 +1,22 @@
+# Production overrides, layered on top of docker-compose.yml by
+# scripts/deploy.sh:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml ...
+#
+# The base file is the local stack, where every port is published on every
+# interface for convenience. On a server only the web app may be reachable,
+# and only through the reverse proxy on the same host (CLAUDE.md section 15).
+services:
+  web:
+    # `!override` replaces the list instead of merging with the base file's
+    # "3000:3000", which would publish the app on every interface as well.
+    ports: !override
+      - "127.0.0.1:3000:3000"
+
+  postgres:
+    # Never on a public interface: the other services reach it over the
+    # compose network by service name.
+    ports: !override []
+
+  redis:
+    ports: !override []
