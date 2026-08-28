@@ -123,10 +123,26 @@ matching DB restore — there is no automation for that.
 ## Reverse proxy
 
 The proxy is not part of the repo; it upstreams to `127.0.0.1:<WEB_PORT>`.
-Whatever it is, `/api/events` is an SSE stream (§9 "Live updates"): nginx needs `proxy_buffering off;` and a
-long `proxy_read_timeout` (e.g. `1h`) on that location, `proxy_http_version
-1.1` and `Connection ""`; otherwise live updates stall behind the buffer
-or get cut by the default 60 s read timeout.
+Whatever it is, `/api/events` is an SSE stream (§9 "Live updates"): nginx
+needs `proxy_buffering off;` and a long `proxy_read_timeout` (e.g. `1h`)
+on that location, `proxy_http_version 1.1` and `Connection ""`; otherwise
+live updates stall behind the buffer or get cut by the default 60 s read
+timeout. `X-Forwarded-Proto`/`Host` must be forwarded too — the app builds
+absolute URLs from them.
+
+**Known trap — the server runs a hosting panel (VestaCP/HestiaCP).** Its
+nginx vhost is *generated* (`nginx → Apache :8443 → public_html`), which
+is where the first 403 came from: the app never saw the request. Editing
+the generated file is pointless — the panel rewrites it on the next
+certificate renewal or domain edit. The durable fix is a custom **proxy
+template**: copy `default.tpl`/`default.stpl` in
+`<panel>/data/templates/web/nginx/` to `vrt.tpl`/`vrt.stpl`, replace their
+`location /` (and drop the nested static-file `location ~* ...` — Next
+serves its own assets — and `@fallback`) with the two locations above,
+keep the `%ip%`/`%domain%`/`ssl_*`/`include` lines the panel fills in, then
+`v-change-web-domain-proxy-tpl <user> <domain> vrt` and reload nginx. The
+http template just `return 301 https://$host$request_uri;`. The
+certificate is the panel's as well; nothing in the repo depends on it.
 
 ## Why the script checks the tag out twice
 
