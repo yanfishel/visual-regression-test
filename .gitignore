@@ -1,0 +1,26 @@
+.idea/
+.junie/
+.worktrees/
+node_modules/
+.env
+.env.local
+.env.*.local
+dist/
+.data/
+
+.next/
+next-env.d.ts
+.turbo/
+*.tsbuildinfo
+
+# Downloaded skill packages (skill-manager cache), not repo source.
+.agents/
+.claude/skills/
+
+# Playwright e2e artifacts
+apps/web/test-results/
+apps/web/playwright-report/
+
+# Session scratch: review packages, agent reports, one-off SQL.
+.superpowers/
+.tmp-*

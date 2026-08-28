@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Rapid pushes to the same branch supersede each other's runs; only the
+# newest matters. master pushes group by ref too, so a queue of merges
+# still cancels down to the latest.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # apps/worker/src/regions.browser.test.ts drives a real Chromium: the
+      # DOM segmentation is about layout, which no fake Page can provide.
+      # `--with-deps` installs the system libraries Chromium needs on the
+      # runner; the version matches the pinned playwright npm package.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run typecheck
+
+      - run: npm run lint
+
+      - run: npm run format:check
+
+      - run: npm test
+
+      # Next builds without DATABASE_URL: the db client connects lazily on
+      # first query, not at import - see packages/db/src/client.ts.
+      - run: npm run build -w @vrt/web

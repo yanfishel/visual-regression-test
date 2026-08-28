@@ -1,0 +1,44 @@
+{
+  "name": "vrt",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:clerk": "node scripts/dev.mjs --mode=clerk",
+    "dev:web": "npm run dev -w @vrt/web",
+    "dev:web:none": "cross-env AUTH_MODE=none npm run dev -w @vrt/web",
+    "dev:web:clerk": "cross-env AUTH_MODE=clerk npm run dev -w @vrt/web",
+    "dev:worker": "npm run dev -w @vrt/worker",
+    "build:web": "npm run build -w @vrt/web",
+    "start:web:none": "cross-env AUTH_MODE=none npm run start -w @vrt/web",
+    "start:web:clerk": "cross-env AUTH_MODE=clerk npm run start -w @vrt/web",
+    "start:worker": "npm run start -w @vrt/worker",
+    "db:generate": "npm run generate -w @vrt/db",
+    "db:migrate": "npm run migrate -w @vrt/db",
+    "db:seed": "npm run seed -w @vrt/db",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "e2e": "npm run e2e -w @vrt/web"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.7.5",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.23",
+    "prettier": "3.9.6",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^2.1.4"
+  }
+}

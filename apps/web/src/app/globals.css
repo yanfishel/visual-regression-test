@@ -1,0 +1,267 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f6f5fb;
+  --surface: #ffffff;
+  --surface-alt: #edebf7;
+  --border: #dedaf0;
+  --text: #17151f;
+  --text-muted: #6a6580;
+  --text-faint: #948fab;
+
+  --accent: #6237e8;
+  --accent-strong: #4c22c9;
+  --accent-soft: #ede7ff;
+  --accent-contrast: #ffffff;
+
+  --success: #16965b;
+  --success-soft: #dff6ea;
+  --danger: #d81f4b;
+  --danger-soft: #fde1e8;
+  /* Third status hue, added for the `user` role badge: the palette had only
+     green and red, and neither can stand for "no special standing". */
+  --info: #1786c4;
+  --info-soft: #ddf0fb;
+  /* Fourth hue, added for the run-trigger marker: manual (accent), scheduled
+     (info) and webhook needed three tells that are none of passed/failed. */
+  --warning: #b8620a;
+  --warning-soft: #fdecd6;
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #110e1a;
+  --surface: #17131f;
+  --surface-alt: #1d1828;
+  --border: #2c2740;
+  --text: #f1eefa;
+  --text-muted: #a49dc0;
+  --text-faint: #6e6788;
+
+  --accent: #9575ff;
+  --accent-strong: #ac96ff;
+  --accent-soft: #251c42;
+  --accent-contrast: #14101f;
+
+  --success: #34d399;
+  --success-soft: #12301f;
+  --danger: #ff6f87;
+  --danger-soft: #3a1420;
+  --info: #4cbcf0;
+  --info-soft: #0f2a3a;
+  --warning: #f2b04e;
+  --warning-soft: #3a2a12;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-bg font-sans text-text;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-sm border border-transparent px-4 py-2 text-sm font-semibold;
+  }
+  .btn-primary {
+    @apply bg-accent text-accent-contrast hover:bg-accent-strong;
+  }
+  .btn-quiet {
+    @apply border-border bg-transparent text-text-muted hover:border-text-faint hover:text-text;
+  }
+  /* No alpha modifiers (`border-danger/40`) anywhere in here: the tokens are
+     raw `var(--…)` colors, which Tailwind can't split into a channel value. */
+  .btn-danger {
+    @apply border-danger-soft bg-danger-soft text-danger hover:border-danger hover:bg-danger hover:text-surface;
+  }
+  /* Accent-outlined secondary action (the run page's per-page "Approve N"):
+     louder than btn-quiet, quieter than the one btn-primary on the page. */
+  .btn-outline {
+    @apply border-accent bg-transparent text-accent hover:bg-accent-soft;
+  }
+  .btn:disabled {
+    @apply cursor-not-allowed opacity-50 hover:bg-accent;
+  }
+  .btn-danger:disabled,
+  .btn-quiet:disabled,
+  .btn-outline:disabled {
+    @apply hover:bg-transparent;
+  }
+  /* A count riding on a button ("Approve 3"): a solid accent tag so the
+     figure reads apart from the verb. */
+  .btn-count {
+    @apply inline-flex min-w-5 items-center justify-center rounded-full bg-accent px-1.5 font-mono text-[11px] leading-4 text-accent-contrast;
+  }
+
+  .panel {
+    @apply rounded border border-border bg-surface;
+  }
+
+  /* Square hit-target for icon-only controls (project-card toolbar). Hover
+     colors are applied per usage so a destructive button can go danger-soft
+     without fighting an @apply'd default. */
+  .btn-icon {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-text-muted transition-colors;
+  }
+
+  .field-input {
+    @apply rounded-sm border border-border bg-bg px-3 py-2 font-mono text-sm text-text placeholder:text-text-faint focus-visible:border-accent;
+  }
+
+  /* A liveness dot with a soft halo (the worker indicators, header and
+     sidebar). Callers add the fill and the halo colour: `bg-success
+     ring-success-soft`, `bg-danger ring-danger-soft`. */
+  .status-dot {
+    @apply inline-block h-2 w-2 rounded-full ring-[3px];
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-mono text-xs font-bold;
+  }
+  .pill::before {
+    content: "";
+    @apply h-1.5 w-1.5 rounded-full bg-current;
+  }
+  /* A pill for something still in flight (queued/running run) swaps the
+     status dot for a spinner it renders itself - see run-outcome-pill.tsx. */
+  .pill-busy::before {
+    content: none;
+  }
+  .pill-passed {
+    @apply bg-success-soft text-success;
+  }
+  .pill-failed {
+    @apply bg-danger-soft text-danger;
+  }
+  .pill-new,
+  .pill-queued {
+    @apply bg-surface-alt text-text-muted;
+  }
+  .pill-approved,
+  .pill-running {
+    @apply bg-accent-soft text-accent;
+  }
+
+  /* Blueprint-grid backdrop (landing hero, empty states, capture
+     placeholders): a faint grid that fades out toward the edges. It lives on
+     a `::before` layer behind the element's own children - a mask-image on
+     the element itself faded the content too, and the /projects empty-state
+     text at the bottom of the ellipse came out nearly invisible. `isolation`
+     + `z-index: -1` keep the layer under everything the element holds. */
+  .landing-grid {
+    position: relative;
+    isolation: isolate;
+  }
+  .landing-grid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, black 20%, transparent 78%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, black 20%, transparent 78%);
+  }
+
+  /* react-day-picker (the run table's date-range filter) on the app's tokens.
+     Its own stylesheet is imported by the component and sets these variables
+     on `.rdp-root` too; the extra ancestor here wins on specificity whichever
+     sheet lands later. Sizes are tightened from its 44px cells - this lives
+     in a popover, not a page. */
+  .date-range-picker .rdp-root {
+    --rdp-accent-color: var(--accent);
+    --rdp-accent-background-color: var(--accent-soft);
+    --rdp-range_start-color: var(--accent-contrast);
+    --rdp-range_end-color: var(--accent-contrast);
+    --rdp-range_middle-color: var(--text);
+    --rdp-today-color: var(--accent);
+    --rdp-day-height: 2.125rem;
+    --rdp-day-width: 2.125rem;
+    --rdp-day_button-height: 2rem;
+    --rdp-day_button-width: 2rem;
+    --rdp-day_button-border-radius: 7px;
+    --rdp-nav-height: 2.25rem;
+    --rdp-nav_button-height: 1.75rem;
+    --rdp-nav_button-width: 1.75rem;
+    --rdp-weekday-opacity: 1;
+    @apply text-sm text-text;
+  }
+  .date-range-picker .rdp-weekday {
+    @apply font-mono text-xs font-bold uppercase tracking-wide text-text-faint;
+  }
+  .date-range-picker .rdp-month_caption {
+    @apply text-sm font-bold;
+  }
+  .date-range-picker .rdp-chevron {
+    @apply fill-text-muted;
+  }
+  /* Hover only on unselected days: on a range end the accent fill must stay,
+     or the white day number vanishes into a grey hover square. */
+  .date-range-picker .rdp-day:not(.rdp-selected) .rdp-day_button:hover:not([disabled]) {
+    @apply bg-surface-alt;
+  }
+
+  /* The About page's FAQ answers (Radix accordion content). The slide has to
+     be plain CSS rather than a Tailwind `animate-*` utility: it interpolates
+     to `--radix-accordion-content-height`, a variable Radix writes on the
+     element itself while it measures. */
+  .accordion-answer {
+    @apply overflow-hidden;
+  }
+  .accordion-answer[data-state="open"] {
+    animation: accordion-open 180ms ease-out;
+  }
+  .accordion-answer[data-state="closed"] {
+    animation: accordion-close 150ms ease-out;
+  }
+  /* The rest of the landing falls back to a static render under reduced
+     motion (`Reveal`); the answers do the same. */
+  @media (prefers-reduced-motion: reduce) {
+    .accordion-answer[data-state="open"],
+    .accordion-answer[data-state="closed"] {
+      animation: none;
+    }
+  }
+}
+
+@keyframes accordion-open {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-close {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+@layer base {
+  /* The app-wide keyboard focus ring. It belongs in `base` so a component can
+     opt out with a plain `outline-none` utility - unlayered, it outranked
+     every utility and painted a second ring around Radix menu and select
+     items, which already show their position with a highlight.
+
+     It deliberately sets no `border-radius`: a radius here would square off
+     round controls while they hold focus (the avatar trigger, which Radix
+     re-focuses when its dropdown closes). Browsers follow each element's own
+     radius, and every focusable control in the app already carries one. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}

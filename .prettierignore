@@ -1,0 +1,27 @@
+# Build output and dependencies
+node_modules/
+.next/
+dist/
+.turbo/
+.worktrees/
+
+# Local screenshot storage and Playwright artifacts
+.data/
+apps/web/test-results/
+apps/web/playwright-report/
+
+# Generated: drizzle writes these, and its journal is compared byte for byte
+packages/db/migrations/
+
+# Lockfile - npm owns its formatting
+package-lock.json
+
+# Downloaded skill packages (skill-manager cache), not repo source
+.agents/
+.claude/skills/
+
+# Markdown is hand-wrapped here and the docs are a first-class artefact
+# (CLAUDE.md section 10). Prettier changes nothing about how they render but
+# strips the indentation off continuation lines inside multi-line inline code
+# spans, which makes the source markedly harder to read.
+*.md

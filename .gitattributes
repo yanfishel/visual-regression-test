@@ -1,0 +1,17 @@
+# Check every text file out with LF, on every platform.
+#
+# Without this, a Windows clone with the default core.autocrlf=true gets CRLF
+# in the working tree while the blobs stay LF. Prettier's `endOfLine: "lf"`
+# then reports every file as unformatted, so `npm run format:check` passes in
+# CI (Linux) and can never pass locally - and `npm run format` rewrites the
+# endings that git immediately converts back.
+* text=auto eol=lf
+
+# Binary assets git shouldn't inspect or convert.
+*.png binary
+*.ico binary
+*.webp binary
+*.jpg binary
+*.jpeg binary
+*.woff binary
+*.woff2 binary

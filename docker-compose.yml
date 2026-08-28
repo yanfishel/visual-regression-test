@@ -1,0 +1,98 @@
+# Explicit project name: images, containers, the network and the pgdata
+# volume are all prefixed with it. Without this the prefix falls back to the
+# checkout directory's name, so a differently-named clone would quietly run
+# a second, empty stack next to the first.
+name: visual-regression-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vrt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vrt}
+      POSTGRES_DB: ${POSTGRES_DB:-vrt}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vrt}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/db/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vrt}:${POSTGRES_PASSWORD:-vrt}@postgres:5432/${POSTGRES_DB:-vrt}
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vrt}:${POSTGRES_PASSWORD:-vrt}@postgres:5432/${POSTGRES_DB:-vrt}
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /data/shots
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+    volumes:
+      - ./.data/shots:/data/shots
+    # Chromium needs more than Docker's 64MB default /dev/shm.
+    shm_size: "1gb"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-vrt}:${POSTGRES_PASSWORD:-vrt}@postgres:5432/${POSTGRES_DB:-vrt}
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /data/shots
+      STORAGE_URL_PREFIX: /api/shots
+      AUTH_MODE: ${AUTH_MODE:-none}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      CLERK_PUBLISHABLE_KEY: ${CLERK_PUBLISHABLE_KEY:-}
+      CLERK_ENCRYPTION_KEY: ${CLERK_ENCRYPTION_KEY:-}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./.data/shots:/data/shots
+
+volumes:
+  pgdata:
