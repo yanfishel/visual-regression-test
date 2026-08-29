@@ -7,7 +7,8 @@ keeps the server setup, the GitHub side and the reasoning. Started
 ## Shape
 
 One Debian VPS, Docker Engine + compose plugin, the repo cloned to
-`/opt/vrt` under a dedicated `deploy` user, the app served by the host's
+`/home/vrt/app` (`DEPLOY_PATH`; never a panel docroot — see the trap
+below) under the unprivileged `vrt` user (no sudo, docker group), the app served by the host's
 own reverse proxy from `127.0.0.1:${WEB_PORT:-3000}`. A published GitHub Release runs
 `.github/workflows/deploy.yml`, which SSHes in and runs
 `scripts/deploy.sh <tag>`. Images are built on the server; there is no
@@ -41,28 +42,39 @@ sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-The `deploy` user (docker group, no sudo) and the checkout:
+The app user (docker group, no sudo — an existing unprivileged user is
+fine, `adduser --disabled-password --gecos "" vrt` otherwise) and the
+checkout. Under root, `sudo -iu vrt <cmd>` is `su - vrt -c '<cmd>'`:
 
 ```bash
-sudo adduser --disabled-password --gecos "" deploy
-sudo usermod -aG docker deploy
-sudo mkdir -p /opt/vrt && sudo chown deploy:deploy /opt/vrt
-sudo -iu deploy git clone https://github.com/yanfishel/visual-regression-test.git /opt/vrt
-sudo -iu deploy mkdir -p /opt/vrt/.data/shots
-sudo chown 1000:1000 /opt/vrt/.data/shots
+sudo usermod -aG docker vrt
+sudo -iu vrt git clone https://github.com/yanfishel/visual-regression-test.git /home/vrt/app
+sudo -iu vrt mkdir -p /home/vrt/app/.data/shots
+sudo chown 1001:1001 /home/vrt/app/.data/shots
 ```
 
-The last two lines are the `.data/shots` trap (§15): both images run as
-uid 1000 (`node` in `node:22-slim`, `pwuser` in the Playwright image); a
-bind-mount directory that Docker creates on first `up` is root-owned and
-the worker fails every `put`. `deploy.sh` keeps `mkdir -p`ing it so a
-wiped directory reappears, but ownership is set here, once.
+The last two lines are the `.data/shots` trap (§15). The worker runs as
+`pwuser`, which is **uid 1001** in `mcr.microsoft.com/playwright:*-noble`
+(Ubuntu 24.04 ships its own `ubuntu` user at 1000 — check with
+`docker compose exec worker id`, don't assume); a bind-mount directory
+that Docker creates on first `up` is root-owned and every `put` fails
+with `EACCES: permission denied, mkdir '/data/shots/xx'`. `web` runs as
+`node` (uid 1000) and only reads shots through the world-readable bits;
+its one write, `releaseFaviconFile`, is best-effort by design and logs
+the `EACCES`. `deploy.sh` keeps `mkdir -p`ing the directory so a wiped
+one reappears, but ownership is set here, once.
 
 `.env`, from the example, `chmod 600`:
 
 ```bash
-sudo -iu deploy bash -c 'cp /opt/vrt/.env.example /opt/vrt/.env && chmod 600 /opt/vrt/.env && nano /opt/vrt/.env'
+sudo -iu vrt bash -c 'cp /home/vrt/app/.env.example /home/vrt/app/.env && chmod 600 /home/vrt/app/.env && nano /home/vrt/app/.env'
 ```
+
+**Known trap:** Compose interpolates `$NAME` inside `.env` values. A
+generated password with a `$` in it (`…$khD…`) reaches the containers
+with that fragment replaced by an empty string, and the only sign is a
+`WARN The "khD" variable is not set` on every compose command. Write
+`$$` for a literal `$`, or generate secrets with `openssl rand -hex`.
 
 Set `POSTGRES_PASSWORD` (Compose builds `DATABASE_URL` from the
 `POSTGRES_*` values itself, so the example's `DATABASE_URL` line is
@@ -81,9 +93,9 @@ server, so the private half never sits on the box:
 ssh-keygen -t ed25519 -C vrt-deploy -f $env:USERPROFILE\.ssh\vrt-deploy -N '""'
 ```
 
-Public half into `~deploy/.ssh/authorized_keys` (`chmod 700 ~/.ssh`,
+Public half into `~vrt/.ssh/authorized_keys` (`chmod 700 ~/.ssh`,
 `600 authorized_keys`). Verify with
-`ssh -i ~/.ssh/vrt-deploy deploy@<host> docker ps`. The host key for the
+`ssh -i ~/.ssh/vrt-deploy vrt@<host> docker ps`. The host key for the
 workflow's pinned `known_hosts` comes from `ssh-keyscan -t ed25519 <host>`
 run locally.
 
@@ -94,8 +106,8 @@ Repository secrets (Settings → Secrets and variables → Actions):
 | Secret               | Value                                          |
 |----------------------|------------------------------------------------|
 | `DEPLOY_HOST`        | domain or IP                                   |
-| `DEPLOY_USER`        | `deploy`                                       |
-| `DEPLOY_PATH`        | `/opt/vrt`                                     |
+| `DEPLOY_USER`        | `vrt`                                          |
+| `DEPLOY_PATH`        | `/home/vrt/app`                                |
 | `DEPLOY_SSH_KEY`     | the private key file, verbatim                 |
 | `DEPLOY_KNOWN_HOSTS` | the `ssh-keyscan` line                         |
 
@@ -116,17 +128,44 @@ reaches the SSH command line.
 
 Rollback: Actions → Deploy → Run workflow → tag of the previous release.
 The same on the server without GitHub:
-`sudo -iu deploy /opt/vrt/scripts/deploy.sh v1.2.3`. Migrations are
+`sudo -iu vrt /home/vrt/app/scripts/deploy.sh v1.2.3`. Migrations are
 forward-only (drizzle), so a rollback past a schema change needs a
 matching DB restore — there is no automation for that.
 
 ## Reverse proxy
 
 The proxy is not part of the repo; it upstreams to `127.0.0.1:<WEB_PORT>`.
-Whatever it is, `/api/events` is an SSE stream (§9 "Live updates"): nginx needs `proxy_buffering off;` and a
-long `proxy_read_timeout` (e.g. `1h`) on that location, `proxy_http_version
-1.1` and `Connection ""`; otherwise live updates stall behind the buffer
-or get cut by the default 60 s read timeout.
+Whatever it is, `/api/events` is an SSE stream (§9 "Live updates"): nginx
+needs `proxy_buffering off;` and a long `proxy_read_timeout` (e.g. `1h`)
+on that location, `proxy_http_version 1.1` and `Connection ""`; otherwise
+live updates stall behind the buffer or get cut by the default 60 s read
+timeout. `X-Forwarded-Proto`/`Host` must be forwarded too — the app builds
+absolute URLs from them.
+
+**Known trap — the server runs a hosting panel (VestaCP/HestiaCP).** Its
+nginx vhost is *generated* (`nginx → Apache :8443 → public_html`), which
+is where the first 403 came from: the app never saw the request. Editing
+the generated file is pointless — the panel rewrites it on the next
+certificate renewal or domain edit. The durable fix is a custom **proxy
+template**: copy `default.tpl`/`default.stpl` in
+`<panel>/data/templates/web/nginx/` to `vrt.tpl`/`vrt.stpl`, replace their
+`location /` (and drop the nested static-file `location ~* ...` — Next
+serves its own assets — and `@fallback`) with the two locations above,
+keep the `%ip%`/`%domain%`/`ssl_*`/`include` lines the panel fills in, then
+`v-change-web-domain-proxy-tpl <user> <domain> vrt` and reload nginx. The
+http template just `return 301 https://$host$request_uri;`. The
+certificate is the panel's as well; nothing in the repo depends on it.
+
+**Known trap — never clone into the panel's docroot** (`~/web/<domain>/
+public_html`). The panel's Apache serves that directory on `:8443`
+directly, reachable from the internet with the domain as SNI — the
+checkout, `.env` included, was readable with
+`curl -k --resolve <domain>:8443:<ip> https://<domain>:8443/.env` until
+the clone moved to `/home/vrt/app`. Every secret that had been in that
+`.env` was rotated afterwards (Postgres password via `ALTER USER` inside
+the running container, since the volume keeps the old one; Clerk secret
+key regenerated; new `CLERK_ENCRYPTION_KEY`). The checkout lives outside
+any web root; `DEPLOY_PATH` names it.
 
 ## Why the script checks the tag out twice
 

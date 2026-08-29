@@ -783,7 +783,7 @@ Full write-up (server setup commands, secrets, trap history):
 - **A published GitHub Release deploys itself.** `.github/workflows/deploy.yml`
   (`release: published`, drafts and prereleases excluded) SSHes into the
   server as the `deploy` user, checks the tag out in the server's clone
-  (`DEPLOY_PATH`, `/opt/vrt`) and runs `scripts/deploy.sh <tag>` from *that*
+  (`DEPLOY_PATH`, `/home/vrt/app`) and runs `scripts/deploy.sh <tag>` from *that*
   checkout: fetch → checkout → `docker compose build --pull` → `up -d
   --remove-orphans` → prune dangling layers → poll the published web port
   for up to 60 s. **Rollback = the same workflow by hand** (`workflow_dispatch`
@@ -808,10 +808,16 @@ Full write-up (server setup commands, secrets, trap history):
   `DEPLOY_PATH`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`). The deploy key is
   a dedicated ed25519 pair; `known_hosts` is pinned, not `ssh-keyscan`ned
   at run time.
-- **Known trap:** `.data/shots` must exist and be writable by uid 1000
-  before the first `up` — a bind-mount directory Docker creates itself is
-  root-owned and the worker (`pwuser`) can't write shots. `deploy.sh`
-  `mkdir -p`s it; the one-time `chown 1000:1000` is in deploy.md.
+- **Known trap:** `.data/shots` must exist and be owned by **uid 1001**
+  before the first `up` — `pwuser` in the `-noble` Playwright image is
+  1001 (1000 is Ubuntu's own user there), and a bind-mount directory
+  Docker creates itself is root-owned. `web` (`node`, uid 1000) only
+  reads, plus a best-effort favicon delete that just logs. `deploy.sh`
+  `mkdir -p`s the directory; the one-time `chown 1001:1001` is in
+  deploy.md.
+- **Known trap:** Compose interpolates `$NAME` inside `.env` values — a
+  password containing `$` reaches the containers truncated, with only a
+  `"NAME" variable is not set` warning. Escape it as `$$`.
 - **Known trap:** `deploy.sh` replaces *itself* mid-run (`git checkout`),
   so the whole body sits in `main()` called on the last line — bash reads
   scripts incrementally and would otherwise continue in the new file at

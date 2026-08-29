@@ -30,7 +30,7 @@ main() {
   git checkout --detach --quiet "$tag"
 
   # The bind mount's host directory must exist before `up`, or Docker
-  # creates it as root and the worker (uid 1000) cannot write shots into it.
+  # creates it as root and the worker (pwuser, uid 1001) cannot write into it.
   # First-time ownership is set during server setup (docs/notes/deploy.md).
   mkdir -p .data/shots
 
