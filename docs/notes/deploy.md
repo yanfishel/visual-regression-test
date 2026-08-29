@@ -95,9 +95,26 @@ ssh-keygen -t ed25519 -C vrt-deploy -f $env:USERPROFILE\.ssh\vrt-deploy -N '""'
 
 Public half into `~vrt/.ssh/authorized_keys` (`chmod 700 ~/.ssh`,
 `600 authorized_keys`). Verify with
-`ssh -i ~/.ssh/vrt-deploy vrt@<host> docker ps`. The host key for the
-workflow's pinned `known_hosts` comes from `ssh-keyscan -t ed25519 <host>`
-run locally.
+`ssh -i ~/.ssh/vrt-deploy vrt@<host> docker ps`.
+
+The **server's host key** for the workflow's pinned `known_hosts` is a
+different key from the user's: read it on the box rather than
+`ssh-keyscan`ing it over the network (Windows' bundled OpenSSH also fails
+the KEX negotiation against Debian 12):
+
+```bash
+echo "<domain>,<ip> $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+```
+
+Three fields — hosts, `ssh-ed25519`, the base64 key. **Known trap:** the
+first field must match `DEPLOY_HOST` byte for byte (listing domain and IP
+comma-separated covers both), and it is the *key*, not the
+`SHA256:…` fingerprint `ssh-keygen -l` prints: a fingerprint there yields
+a bare `Host key verification failed`, a key for another host name the
+same, and a wrong key the loud "REMOTE HOST IDENTIFICATION HAS CHANGED"
+banner — in that last case compare the fingerprint in the log with
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` before replacing
+anything.
 
 ## GitHub side
 
