@@ -7,7 +7,8 @@ keeps the server setup, the GitHub side and the reasoning. Started
 ## Shape
 
 One Debian VPS, Docker Engine + compose plugin, the repo cloned to
-`/opt/vrt` under a dedicated `deploy` user, the app served by the host's
+`/home/vrt/app` (`DEPLOY_PATH`; never a panel docroot — see the trap
+below) under a dedicated `deploy` user, the app served by the host's
 own reverse proxy from `127.0.0.1:${WEB_PORT:-3000}`. A published GitHub Release runs
 `.github/workflows/deploy.yml`, which SSHes in and runs
 `scripts/deploy.sh <tag>`. Images are built on the server; there is no
@@ -143,6 +144,17 @@ keep the `%ip%`/`%domain%`/`ssl_*`/`include` lines the panel fills in, then
 `v-change-web-domain-proxy-tpl <user> <domain> vrt` and reload nginx. The
 http template just `return 301 https://$host$request_uri;`. The
 certificate is the panel's as well; nothing in the repo depends on it.
+
+**Known trap — never clone into the panel's docroot** (`~/web/<domain>/
+public_html`). The panel's Apache serves that directory on `:8443`
+directly, reachable from the internet with the domain as SNI — the
+checkout, `.env` included, was readable with
+`curl -k --resolve <domain>:8443:<ip> https://<domain>:8443/.env` until
+the clone moved to `/home/vrt/app`. Every secret that had been in that
+`.env` was rotated afterwards (Postgres password via `ALTER USER` inside
+the running container, since the volume keeps the old one; Clerk secret
+key regenerated; new `CLERK_ENCRYPTION_KEY`). The checkout lives outside
+any web root; `DEPLOY_PATH` names it.
 
 ## Why the script checks the tag out twice
 
