@@ -67,11 +67,21 @@ Every screenshot follows your GitHub theme.
   <tr>
     <td width="50%" align="center">
       <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/landing-dark.png">
+        <img src="docs/screenshots/landing.png" alt="Landing page. About, Features, FAQ and Pricing tabs">
+      </picture>
+      <sub><b>Landing page</b> About, Features, FAQ and Pricing tabs</sub>
+    </td>
+    <td width="50%" align="center">
+      <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/projects-dark.png">
         <img src="docs/screenshots/projects-light.png" alt="Projects list with a latest-run preview per project, a seven-day pass-rate timeline and recent runs">
       </picture>
       <sub><b>Projects</b> — latest run per project, pass rate for the week, recent activity</sub>
     </td>
+    
+  </tr>
+  <tr>
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/run-dark.png">
@@ -79,8 +89,6 @@ Every screenshot follows your GitHub theme.
       </picture>
       <sub><b>Run results</b> — one card per page × viewport, approve per page or all at once</sub>
     </td>
-  </tr>
-  <tr>
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/diff-overlay-dark.png">
@@ -88,6 +96,8 @@ Every screenshot follows your GitHub theme.
       </picture>
       <sub><b>Diff overlay</b> — changed pixels in red, regions outlined</sub>
     </td>
+  </tr>
+  <tr>
     <td width="50%" align="center">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/diff-curtain-dark.png">
@@ -95,12 +105,10 @@ Every screenshot follows your GitHub theme.
       </picture>
       <sub><b>Curtain</b> — drag the divider between baseline and current</sub>
     </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
+    <td width="50%" align="center">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dialog-schedule-dark.png">
-        <img src="docs/screenshots/dialog-schedule-light.png" alt="Project dialog, Schedule tab: runs per day, time window, a preview of the derived run times and the e-mail toggle" width="70%">
+        <img src="docs/screenshots/dialog-schedule-light.png" alt="Project dialog, Schedule tab: runs per day, time window, a preview of the derived run times and the e-mail toggle">
       </picture>
       <sub><b>Schedule</b> — a count and a window, the run times are derived</sub>
     </td>
