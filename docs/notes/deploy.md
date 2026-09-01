@@ -42,6 +42,13 @@ sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
+**Known trap:** swap is not only about the build. The production box (3.8 GB,
+shared with a database and three other Node apps) ran without it, and on
+2026-08-31 the kernel killed a Chromium renderer mid-capture — which
+Playwright never surfaced as an error, so a run hung for 27 hours and both
+project schedules stopped firing (worker.md "Watchdogs"). The worker now
+times that out and restarts itself; the swap is what stops it happening.
+
 The app user (docker group, no sudo — an existing unprivileged user is
 fine, `adduser --disabled-password --gecos "" vrt` otherwise) and the
 checkout. Under root, `sudo -iu vrt <cmd>` is `su - vrt -c '<cmd>'`:

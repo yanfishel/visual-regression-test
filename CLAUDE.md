@@ -319,6 +319,21 @@ caused a false positive (details: worker.md):
    (`apps/worker/src/queue.ts`); concurrent runs fight over CPU and make the
    timing-sensitive steps above less reliable.
 
+**Known trap:** not one of those steps has a timeout of its own —
+`page.evaluate` has none in Playwright, and neither do `page.close()` /
+`context.close()` / `browser.close()`. A renderer that dies unnoticed (an OOM
+kill on a memory-tight host) parks the awaiting promise for ever; BullMQ's
+lock expires meanwhile, so the queue counts the worker idle while it still
+holds the only `concurrency: 1` slot, and `assertNoActiveRun` skips that
+project's schedule for as long as it lasts — 27 h on 2026-08-31. Every such
+call now runs under `withDeadline` (`apps/worker/src/deadline.ts`): **120 s
+per page/viewport pair** (→ a `capture_failures` row, `kind: timeout`, the
+rest of the run continues), **15 s per close** (logged, never fatal), and
+**30 min per job**, which deliberately **exits the process** so Docker
+restarts the worker and the stalled-retry guard ends the run. The scroll pass
+is capped at `MAX_SCROLL_STEPS` for the same reason — a feed that grows as it
+is scrolled outruns its own `scrollHeight` re-read. Full story: worker.md.
+
 ---
 
 ## 6. Comparison

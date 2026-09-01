@@ -1,6 +1,7 @@
 import type { Page } from "playwright";
 import sharp from "sharp";
 import type { Region } from "@vrt/shared";
+import { withDeadline } from "./deadline.js";
 
 // A region as the in-page scan reports it: screenshot pixels already
 // (CSS px × deviceScaleFactor) but unrounded and not yet clipped to the
@@ -161,14 +162,7 @@ export async function collectRegions(
   deviceScaleFactor: number,
   label: string,
 ): Promise<RawRegion[] | null> {
-  let timer: NodeJS.Timeout | undefined;
   try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`timed out after ${REGION_SCAN_TIMEOUT_MS}ms`)),
-        REGION_SCAN_TIMEOUT_MS,
-      );
-    });
     const scan = (async () => {
       // tsx/esbuild (keep-names) wraps the functions inside segmentPage in its
       // `__name(fn, "name")` helper; Playwright ships the function's *source*
@@ -181,7 +175,7 @@ export async function collectRegions(
       await page.evaluate("globalThis.__name ??= (fn) => fn; 0");
       return page.evaluate(segmentPage, deviceScaleFactor);
     })();
-    const raw = await Promise.race([scan, timeout]);
+    const raw = await withDeadline(scan, REGION_SCAN_TIMEOUT_MS, `Region scan of ${label}`);
     if (!Array.isArray(raw)) {
       throw new Error("scan returned no list");
     }
@@ -189,8 +183,6 @@ export async function collectRegions(
   } catch (error) {
     console.error(`Region scan failed for ${label}:`, error instanceof Error ? error.message : String(error));
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

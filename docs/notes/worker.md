@@ -32,6 +32,70 @@ reaches content that lazily *grows* the page while the pass runs — both put
 Playwright's `fullPage` stitching scroll back in the position of a first
 visitor, re-firing reveal animations mid-capture (the §5.8 false positive).
 
+The re-read is also what makes the pass unbounded on a page that grows *as*
+it is scrolled — an infinite feed, a "load more on scroll" list — so the loop
+stops after `MAX_SCROLL_STEPS` (40) steps regardless of height. 40 viewport
+heights is far past anything worth diffing as one screenshot, and at 500 ms a
+step it keeps the pass inside the per-page deadline below.
+
+## Watchdogs (`apps/worker/src/deadline.ts`)
+
+**The hang of 2026-08-31.** A scheduled run of one project started at
+07:00:54 and was still `running` 27 hours later. The evidence, in the order
+it was read:
+
+- the BullMQ job's stored progress was
+  `{"phase":"capturing","completed":2,"total":3,"label":"Home @ Mobile"}` —
+  the third and last capture of the run, and no `shots` row existed for the
+  run at all (they are all written after the capture loop returns);
+- from 07:22 onwards, `Error: could not renew lock for job 18` every 7.5 s,
+  13 047 times — the lock had expired, the stalled check had moved the job
+  back to `wait`, and `bull:vrt-runs:active` was **empty** while the worker
+  process was still awaiting that very job's promise;
+- inside the container, the Chromium *browser* process was alive with the
+  run's uptime, and there was **no renderer process at all**, at 0.12 % CPU;
+- the host: 4 GB, **no swap**, shared with a database and three other Node
+  apps, ~950 MB available.
+
+So the renderer was killed under memory pressure, Playwright never turned
+that into an error, and the call awaiting it never settled. The three
+mechanisms that should have caught it each didn't: BullMQ's stalled check
+freed the *job* but cannot free a `concurrency: 1` slot held by a promise;
+`reconcileStuckRuns` only sweeps at startup and only runs *without* a job;
+and the run stayed `running`, so `assertNoActiveRun` skipped both projects'
+schedules every minute (`run-in-progress`) — including the other project,
+whose own run sat `queued` behind the wedged slot. `docker compose restart
+worker` was the whole cure: the stalled-retry guard failed the dead run and
+the queued one finished in 30 s.
+
+**What guards it now.** `withDeadline(work, ms, label)` races the work
+against a timer and, just as importantly, swallows the abandoned work's
+later rejection — a Playwright call abandoned this way usually *does* reject
+once its page closes, and an unhandled rejection ends the process. It cannot
+cancel anything: nothing in Playwright can cancel an in-flight protocol
+call, so every caller has to survive the work finishing later.
+
+| Where | Limit | On expiry |
+|---|---|---|
+| One page/viewport pair (`capture.ts`, `capturePage`) | 120 s | `capture_failures` row, `kind: timeout` (`classifyCaptureError` knows `DeadlineError` — our watchdog fires where Playwright would never have thrown, so no message says "Timeout"); the run continues with the other pages |
+| `page.close()` / `context.close()` / `browser.close()` (`closeQuietly`) | 15 s | logged only — cleanup must never end a run that already has its shots |
+| The whole job (`queue.ts`) | 30 min | `process.exit(1)` |
+| The region scan (`regions.ts`) | 5 s | null report, screenshot taken regardless (pre-dates this, now on the shared helper) |
+
+The job-level exit is the deliberate part. By 30 minutes the job's lock is
+long gone and the queue already counts the worker idle, so the only thing
+still held is the concurrency slot — and no in-process cleanup can hand that
+back, because the work behind it cannot be cancelled. Docker's `restart:
+unless-stopped` brings the worker back in seconds and the stalled-retry
+guard in `run-processor.ts` ends the run exactly as it does for any other
+worker death mid-run. `capturePage` also owns no cleanup on purpose: the
+caller's `finally` closes the page, which is what finally releases whatever
+protocol call was parked on it.
+
+Not covered by the per-page deadline, and left to the job-level one:
+`browser.newContext()` and `context.newPage()`, which are protocol calls
+outside `capturePage`.
+
 ## Site favicon (`apps/worker/src/favicon.ts`)
 
 Captured by the worker, never fetched by the web app: while a project has
@@ -154,8 +218,8 @@ is validated by `runJobDataSchema` on the consumer side (`queue.ts`).
 
 ## Stuck runs and stalled retries
 
-Two different mechanisms end a run whose worker died, and they cover
-different moments:
+Three different mechanisms end a run whose worker died or wedged, and they
+cover different moments:
 
 - **`reconcileStuckRuns()`** (`reconcile.ts`) sweeps at worker **startup**:
   every `queued`/`running` run older than `MIN_ORPHAN_AGE_MS` (60 s) with no
@@ -172,6 +236,11 @@ different moments:
   row again, so the run sat `running` for ever next to a healthy idle
   worker; only the *next* worker restart swept it. Fixed 2026-08-23 with the
   worker heartbeat; the UI half of the same bug is in ui.md "Live updates".
+- **The job deadline** in `queue.ts` covers the third case, which neither of
+  the two above can see: a worker that is alive, heartbeating and holding a
+  job that will never finish (the 2026-08-31 hang — "Watchdogs" above). It
+  exits the process, which turns that case back into the ordinary
+  worker-died-mid-run one the stalled-retry guard already handles.
 
 ## Scheduler internals (`apps/worker/src/scheduler.ts`)
 
