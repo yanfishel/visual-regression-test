@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserContext } from "playwright";
-import { buildScrollSettleScript, FREEZE_TIME_AND_RANDOM, prepareContext } from "./stabilize.js";
+import {
+  buildScrollSettleScript,
+  FREEZE_TIME_AND_RANDOM,
+  MAX_SCROLL_STEPS,
+  prepareContext,
+} from "./stabilize.js";
 
 function runFreezeScript(): { now: () => number } {
   const window: { Date?: { now: () => number } } = {};
@@ -105,5 +110,35 @@ describe("prepareContext", () => {
     expect(head.appendChild).toHaveBeenCalledTimes(1);
     const styleEl = head.appendChild.mock.calls[0]?.[0] as { textContent: string };
     expect(styleEl.textContent).toContain("animation-duration: 0s");
+  });
+});
+
+describe("buildScrollSettleScript step cap", () => {
+  it("stops on a page that grows faster than the pass walks it, instead of scrolling for ever", async () => {
+    const visited: number[] = [];
+    // An infinite feed: every step mounts another screenful, so the height
+    // re-read (the whole point of the loop) never catches up. Without the cap
+    // this evaluate never returns - and page.evaluate has no timeout of its
+    // own in Playwright, which is how one such page parked a run for 27 hours.
+    const documentElement = { scrollHeight: 1_000 };
+    const window = {
+      innerHeight: 100,
+      scrollTo: (_x: number, y: number) => {
+        visited.push(y);
+        documentElement.scrollHeight += 100;
+      },
+    };
+    const document = { documentElement, body: { scrollHeight: 0 } };
+
+    const run = new Function("window", "document", `return ${buildScrollSettleScript(0, 5)}`);
+    await run(window, document);
+
+    // Five steps, then the scroll back to the top that always ends the pass.
+    expect(visited).toEqual([0, 100, 200, 300, 400, 0]);
+  });
+
+  it("defaults to a cap rather than leaving the loop unbounded", () => {
+    expect(MAX_SCROLL_STEPS).toBeGreaterThan(0);
+    expect(buildScrollSettleScript(500)).toContain(`const maxSteps = ${MAX_SCROLL_STEPS};`);
   });
 });

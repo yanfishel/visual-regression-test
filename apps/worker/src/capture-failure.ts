@@ -1,4 +1,5 @@
 import type { CaptureFailureKind } from "@vrt/shared";
+import { DeadlineError } from "./deadline.js";
 
 /**
  * A capture failure the loop detects itself (a 404 answer, a PDF instead of a
@@ -36,6 +37,12 @@ const UNREACHABLE_PATTERN =
 export function classifyCaptureError(error: unknown): { kind: CaptureFailureKind; message: string } {
   if (error instanceof CaptureError) {
     return { kind: error.kind, message: error.message };
+  }
+  // Our own watchdog (deadline.ts), not Playwright's - it fires precisely
+  // where Playwright would never have thrown at all, so there is no
+  // "Timeout" in any message for the pattern below to recognise.
+  if (error instanceof DeadlineError) {
+    return { kind: "timeout", message: error.message };
   }
 
   const message = cleanPlaywrightMessage(error instanceof Error ? error.message : String(error));

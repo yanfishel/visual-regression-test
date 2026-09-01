@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Browser } from "playwright";
 import sharp from "sharp";
 import type { PageRow, Viewport } from "@vrt/db";
@@ -6,7 +6,13 @@ import type { RunProgress } from "@vrt/shared";
 import { captureProjectShots } from "./capture.js";
 
 type PageBehavior =
-  "succeed" | "fail" | { gotoError: string } | { status: number; statusText?: string; contentType?: string };
+  | "succeed"
+  | "fail"
+  // A page that never answers at all - the shape a dead renderer leaves
+  // behind, which Playwright itself would wait on for ever.
+  | "hang"
+  | { gotoError: string }
+  | { status: number; statusText?: string; contentType?: string };
 
 function fakeResponse(status: number, statusText: string, contentType: string | undefined) {
   return {
@@ -19,6 +25,7 @@ function fakeResponse(status: number, statusText: string, contentType: string | 
 function fakePage(behavior: PageBehavior, options: { regions?: unknown; screenshot?: Buffer } = {}) {
   return {
     goto: vi.fn(async () => {
+      if (behavior === "hang") return new Promise<never>(() => {});
       if (behavior === "fail") throw new Error("navigation timeout");
       if (behavior === "succeed") return fakeResponse(200, "OK", "text/html; charset=utf-8");
       if ("gotoError" in behavior) throw new Error(behavior.gotoError);
@@ -299,5 +306,64 @@ describe("captureProjectShots", () => {
     expect(failures).toEqual([]);
     expect(shots).toHaveLength(1);
     expect(shots[0]?.regions).toBeNull();
+  });
+});
+
+describe("captureProjectShots deadline", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on a page that never answers and keeps capturing the rest of the run", async () => {
+    // The 2026-08-31 production hang, in miniature: the middle page's
+    // navigation never settles (a renderer killed under memory pressure looks
+    // exactly like this from Node's side), and no Playwright call involved
+    // has a timeout that would ever fire.
+    vi.useFakeTimers();
+    const pages = [fakePage("succeed"), fakePage("hang"), fakePage("succeed")];
+    const browser = fakeBrowser(pages);
+    const pageConfigs = [makePageConfig("page-1"), makePageConfig("page-2"), makePageConfig("page-3")];
+
+    const capturing = captureProjectShots(
+      "https://example.com",
+      pageConfigs,
+      [makeViewportConfig("viewport-1")],
+      async () => browser as unknown as Browser,
+    );
+    // Let the run reach the hanging page (so its deadline timer exists), then
+    // move past any deadline this file could reasonably use.
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const { shots, failures } = await capturing;
+
+    expect(shots.map((shot) => shot.pageId)).toEqual(["page-1", "page-3"]);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({ pageId: "page-2", viewportId: "viewport-1", kind: "timeout" });
+    expect(failures[0]?.message).toContain("/page-2 @ viewport-1");
+    // Closing the abandoned page is what finally releases the parked call.
+    expect(pages[1]!.close).toHaveBeenCalled();
+    expect(browser.close).toHaveBeenCalled();
+  });
+
+  it("finishes the run when closing a page hangs, instead of taking the worker down with it", async () => {
+    vi.useFakeTimers();
+    const pages = [fakePage("succeed")];
+    pages[0]!.close = vi.fn(() => new Promise<never>(() => {}));
+    const browser = fakeBrowser(pages);
+
+    const capturing = captureProjectShots(
+      "https://example.com",
+      [makePageConfig("page-1")],
+      [makeViewportConfig("viewport-1")],
+      async () => browser as unknown as Browser,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const { shots, failures } = await capturing;
+
+    // The shot was already taken - a cleanup step must not be able to lose it.
+    expect(shots.map((shot) => shot.pageId)).toEqual(["page-1"]);
+    expect(failures).toEqual([]);
+    expect(browser.close).toHaveBeenCalled();
   });
 });

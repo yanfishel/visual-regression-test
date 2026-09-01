@@ -134,6 +134,14 @@ export async function stabilizePage(page: Page, waitSelector?: string): Promise<
   await page.waitForTimeout(300);
 }
 
+// The cap that makes the height re-read below safe. A page that *grows* as
+// it is scrolled - an infinite feed, a "load more on scroll" list - can
+// outrun scrollHeight for ever, and the loop lives inside a page.evaluate,
+// which has no timeout of its own in Playwright. 40 viewport heights is far
+// past anything worth diffing as one screenshot, and at 500 ms a step it
+// keeps the whole pass well inside capture.ts's per-page deadline.
+export const MAX_SCROLL_STEPS = 40;
+
 // The page height is re-read from document.documentElement on every step, not
 // snapshotted from document.body before the loop: body.scrollHeight misses
 // pages that scroll on a wrapper (or whose body doesn't own the height), and a
@@ -141,12 +149,15 @@ export async function stabilizePage(page: Page, waitSelector?: string): Promise<
 // the pass is running - both put Playwright's fullPage stitching scroll back
 // in the position of first visitor, re-firing reveal animations mid-capture
 // (the exact CLAUDE.md section 5.8 false positive).
-export function buildScrollSettleScript(settleDelayMs: number): string {
+export function buildScrollSettleScript(settleDelayMs: number, maxSteps: number = MAX_SCROLL_STEPS): string {
   return `(async () => {
   const step = window.innerHeight;
   const settle = ${settleDelayMs};
-  for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+  const maxSteps = ${maxSteps};
+  let steps = 0;
+  for (let y = 0; y < document.documentElement.scrollHeight && steps < maxSteps; y += step) {
     window.scrollTo(0, y);
+    steps++;
     await new Promise((resolve) => setTimeout(resolve, settle));
   }
   window.scrollTo(0, 0);
