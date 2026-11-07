@@ -47,7 +47,40 @@ shared with a database and three other Node apps) ran without it, and on
 2026-08-31 the kernel killed a Chromium renderer mid-capture — which
 Playwright never surfaced as an error, so a run hung for 27 hours and both
 project schedules stopped firing (worker.md "Watchdogs"). The worker now
-times that out and restarts itself; the swap is what stops it happening.
+times that out and restarts itself; the swap and the memory limits below are
+what stop it happening. The swap file must be in `/etc/fstab`: on the
+production box it had been enabled by hand without that line, and a reboot
+on 2026-11-07 silently dropped it — `swapon --show` after any reboot.
+
+### Memory limits
+
+The host is shared: this stack plus three other Node apps, MariaDB, a host
+Postgres and a mail stack on 3.8 GB. Until 2026-11-07 nothing capped the
+containers, so when memory ran short the *kernel* chose the victim host-wide
+— between 2026-08-29 and 09-01 it killed the mail antivirus five times and a
+Chromium renderer once (the 27-hour hang above). `docker-compose.prod.yml`
+now sets `deploy.resources.limits.memory` per service:
+
+| Service  | Limit | Typical | Why                                                                                   |
+|----------|-------|---------|---------------------------------------------------------------------------------------|
+| worker   | 1536M | ~120 MB idle | one Chromium at a time (§5.9); its 1 GB `/dev/shm` (`shm_size`) is charged to the same cgroup |
+| web      | 512M  | ~70–100 MB | `next start`                                                                        |
+| postgres | 256M  | ~40 MB  |                                                                                       |
+| redis    | 128M  | ~10 MB  |                                                                                       |
+
+A capture that outgrows its limit is OOM-killed *inside the worker's cgroup*
+and `restart: unless-stopped` brings the worker back; the §5 watchdogs then
+end the run. Nothing else on the host notices. Compose honours
+`deploy.resources.limits` outside swarm (Compose v5.5.0, cgroup v2 on the
+host); `migrate` and the image builds are not limited.
+
+Checks: `docker compose -f docker-compose.yml -f docker-compose.prod.yml
+config | grep -A2 limits` shows the resolved bytes, `docker stats
+--no-stream` the LIMIT column. Whether a container died of its limit:
+`docker inspect --format '{{.State.OOMKilled}}' <name>` and
+`journalctl -k | grep task_memcg=/system.slice/docker`. To raise a limit,
+edit the prod file and `up -d` (the container is recreated); the limits were
+first applied on the server by hand on 2026-11-07 and shipped in v0.2.2.
 
 The app user (docker group, no sudo — an existing unprivileged user is
 fine, `adduser --disabled-password --gecos "" vrt` otherwise) and the
