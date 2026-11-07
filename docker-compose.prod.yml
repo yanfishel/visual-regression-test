@@ -6,6 +6,13 @@
 # The base file is the local stack, where every port is published on every
 # interface for convenience. On a server only the web app may be reachable,
 # and only through the reverse proxy on the same host (CLAUDE.md section 15).
+#
+# Memory limits: the server is a shared 4 GB host. Without a limit a runaway
+# Chromium in the worker takes the whole box into the kernel OOM killer
+# (it killed clamd and chrome there in Aug 2026); with one, only the
+# container is OOM-killed and `restart: unless-stopped` brings it back.
+# The worker runs one capture at a time (queue concurrency 1) and its 1 GB
+# /dev/shm counts against the same limit.
 services:
   web:
     # `!override` replaces the list instead of merging with the base file's
@@ -14,11 +21,29 @@ services:
     # to; another service on the box may already own 3000.
     ports: !override
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  worker:
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
 
   postgres:
     # Never on a public interface: the other services reach it over the
     # compose network by service name.
     ports: !override []
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   redis:
     ports: !override []
+    deploy:
+      resources:
+        limits:
+          memory: 128M
