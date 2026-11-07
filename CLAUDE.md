@@ -809,7 +809,7 @@ Full write-up (server setup commands, secrets, trap history):
   (`concurrency: deploy`, no cancel) — a cancelled build would leave the
   old containers already stopped.
 - **`docker-compose.prod.yml` is layered over the base file** and only
-  changes ports: `web` on `127.0.0.1:${WEB_PORT:-3000}` (server `.env`)
+  changes ports and memory limits: `web` on `127.0.0.1:${WEB_PORT:-3000}` (server `.env`)
   behind the host's own reverse proxy, `postgres`/`redis` unpublished
   (`!override`, not a merge — the base file's `"3000:3000"` would otherwise
   stay). `deploy.sh` asks `compose port web 3000` which host port to poll
@@ -817,6 +817,15 @@ Full write-up (server setup commands, secrets, trap history):
   (migrate one-shot, bind-mounted `.data/shots`, env from `.env`) is the
   §2 stack as-is; the migrations run on every deploy through the
   `migrate` dependency.
+- **Every production container has a memory limit**
+  (`deploy.resources.limits.memory` in `docker-compose.prod.yml`: worker
+  1536M, web 512M, postgres 256M, redis 128M). The host is a shared 4 GB box;
+  without limits the *kernel* picks the OOM victim host-wide (Aug 2026: the
+  mail antivirus five times, a Chromium renderer once — the §5 27-hour hang).
+  A capture that outgrows 1.5 GB is killed inside its own container, the
+  worker restarts and the §5 watchdogs end the run. **Known trap:** the
+  worker's 1 GB `/dev/shm` counts against its limit. Sizing and checks:
+  deploy.md "Memory limits".
 - **Secrets live in two places, never three:** the server's `.env`
   (hand-edited, `chmod 600`, never in GitHub) and five GitHub Actions
   secrets that only describe the SSH hop (`DEPLOY_HOST`, `DEPLOY_USER`,
